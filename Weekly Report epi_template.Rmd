@@ -1,0 +1,790 @@
+---
+title: "Rapport hebdomadaire épidemiologique"
+output: html_document
+---
+
+```{r cleaning, include = FALSE, warning = FALSE, message = FALSE}
+
+### Nettoyage journalière de la base VHF####
+
+# installation des  packages
+required_packages <- c("incidence", "outbreaks", "summarytools", "RColorBrewer", 
+                       "DT", "reshape2", "arsenal", "formatR", "incidence", "Hmisc", "dplyr", 
+                       "boot", "data.table", "reshape", "xtable", "grid", "lubridate",
+                       "forecast", "R0","tidyverse", "tidyr", "ISOweek", "here",
+                       "epitools", "broom", "flextable", "ggthemes", "zoo", "tidyquant",
+                       "stringr", "RColorBrewer", "janitor", "kableExtra", "stringi")
+
+# Pour éviter l'installation des packages déjà installés
+
+for (pkg in required_packages) {
+  
+  if (pkg %in% rownames(installed.packages()) == FALSE) {
+    
+    install.packages(pkg)
+  }
+}
+
+for (i in seq(along = required_packages))
+  library(required_packages[i], character.only = TRUE)
+
+
+#### Data as of & output folders & lang#### 
+Sys.setlocale(locale = "French") # French for dates
+
+DateAsOf_vhf <- '20181203'
+DateContact <- '20181203'
+DateAlerte <- '20181203'
+
+
+#### Data ####
+path_to_data <- here("data", "vhf",DateAsOf_vhf,"VHF_EXPORT_CONPROB_adj.csv")
+path_to_data2 <- here("data", "contact", DateContact, "Suivi_Contacts.csv")
+path_to_data3 <- here("data", "alerte", DateAlerte, "Alertes.csv")
+
+
+
+# 1) VHF case data
+vhf <- read.csv(path_to_data, stringsAsFactors = FALSE)
+
+# 2) contact data
+contact <- read.csv(path_to_data2, stringsAsFactors = FALSE)
+
+# 3) alerte data
+alerte <- read.csv(path_to_data3, stringsAsFactors = FALSE)
+
+
+### Nettoyage de données - basé sur la liste de variable dans le plan d'analyse
+
+## ID
+
+
+# Status - make a categorical variale with 3 levels
+vhf$StatusAsOfCurrentDate[vhf$StatusAsOfCurrentDate == "Décédé"] <- "Decede"
+
+vhf$StatusAsOfCurrentDate <- factor(vhf$StatusAsOfCurrentDate, 
+                                    levels = c("Decede", "Vivant"), 
+                                    ordered = TRUE)
+
+#Convert all date variables to the same format at one time
+# vhf <- vhf %>%
+# mutate_at(vars(starts_with("Date")), funs(as.Date, format ='%d/%m/%Y'))
+
+
+
+#DateReport
+vhf$DateReport <- as.Date(vhf$DateReport, format = '%d/%m/%Y')
+
+
+# creation d'un variable pour la definition du cas
+vhf$EpiCaseDef <- factor(vhf$EpiCaseDef,
+                         levels = c(1,2, 4,0), 
+                         labels = c("Confirmé","Probable","Suspect", "Testé négatif"), ordered = FALSE)
+
+vhf$EpiCaseDef[vhf$ID=='BENV-265'] <- 'Suspect'
+vhf$EpiCaseDef[vhf$ID=='BENV-264'] <- 'Suspect'
+vhf$EpiCaseDef[vhf$ID=='BENV-271'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-361'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-344'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-643'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-213'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-644'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-265'] <- 'Suspect'
+
+
+
+## Create a new age variable that fixes errors and includes month and years in one variable
+vhf$AgeYr <-  vhf$Age
+vhf$AgeYr <-  ifelse(vhf$AgeYr=="0,200000002980232",0,ifelse(vhf$AgeYr=="0,170000001788139",0,
+                                                             ifelse(vhf$AgeYr=="0,230000004172325",0,
+                                                                    ifelse(vhf$AgeYr=="6,5",0,
+                                                                           ifelse(vhf$AgeYr == "1,5", 1,vhf$AgeYr)))))
+
+vhf$AgeYr[vhf$AgeUnit=="Mois"] <-  ifelse (vhf$AgeYr[vhf$AgeUnit=="Mois"]<12,0,1)
+
+vhf$AgeYr <- as.numeric(vhf$AgeYr)
+
+vhf$AgeGrp = ifelse(vhf$AgeYr < 5, "<5ans",
+                    ifelse(vhf$AgeYr>=5&vhf$AgeYr<15, "5-14ans",
+                           ifelse(vhf$AgeYr>=15&vhf$AgeYr<25, "15-24ans",
+                                  ifelse(vhf$AgeYr>=25&vhf$AgeYr<35, "25-34ans",
+                                         ifelse(vhf$AgeYr>=35&vhf$AgeYr<45, "35-44ans",
+                                                ifelse(vhf$AgeYr>=45&vhf$AgeYr<60, "45-59ans",
+                                                       ifelse(vhf$AgeYr>=60, "60+ans",NA)))))))
+
+
+
+vhf$AgeGrp2 = ifelse(vhf$AgeYr < 5, "<5ans",
+                     ifelse(vhf$AgeYr>=5&vhf$AgeYr<10, "5-9ans",
+                            ifelse(vhf$AgeYr>=10&vhf$AgeYr<15, "10-14ans",
+                                   ifelse(vhf$AgeYr>=15&vhf$AgeYr<20, "15-19ans",
+                                          ifelse(vhf$AgeYr>=20&vhf$AgeYr<25, "20-24ans",
+                                                 ifelse(vhf$AgeYr>=25&vhf$AgeYr<30, "25-29ans",
+                                                        ifelse(vhf$AgeYr>=30&vhf$AgeYr<35, "30-34ans",
+                                                               ifelse(vhf$AgeYr>=35&vhf$AgeYr<39, "35-39ans",
+                                                                      ifelse(vhf$AgeYr>=40&vhf$AgeYr<45, "40-44ans",
+                                                                             ifelse(vhf$AgeYr>=45&vhf$AgeYr<49, "45-49ans",
+                                                                                    ifelse(vhf$AgeYr>=50&vhf$AgeYr<55, "50-54ans",
+                                                                                           ifelse(vhf$AgeYr>=55&vhf$AgeYr<59, "55-59ans",
+                                                                                                  ifelse(vhf$AgeYr>=60&vhf$AgeYr<65, "60-64ans",
+                                                                                                         ifelse(vhf$AgeYr>=65, "65+ans",NA))))))))))))))
+
+vhf$AgeGrp3 = ifelse(vhf$AgeYr < 1, "<1ans",
+                     ifelse(vhf$AgeYr >=1 & vhf$AgeYr<5, "1-4ans",
+                            ifelse(vhf$AgeYr>=5&vhf$AgeYr<15, "5-14ans",
+                                   ifelse(vhf$AgeYr>=15, "15+ans",NA))))
+
+vhf$AgeGrp3 = factor(vhf$AgeGrp3,
+                     levels = c("<1ans","1-4ans","5-14ans", "15+ans"))
+
+
+
+vhf$AgeGrp = factor(vhf$AgeGrp,
+                    levels = c("<5ans","5-14ans","15-24ans",
+                               "25-34ans","35-44ans","45-59ans","60+ans")
+                    ,ordered = TRUE)
+
+vhf$AgeGrp5 = ifelse(vhf$AgeYr < 5, "<5ans",
+                     ifelse(vhf$AgeYr >=5 & vhf$AgeYr<15, "5-14ans",
+                            ifelse(vhf$AgeYr>=15, "15+ans",NA)))
+vhf$AgeGrp5 = factor(vhf$AgeGrp5,
+                     levels = c("<5ans","5-14ans", "15+ans"))
+
+
+# Gender
+vhf$Gender  <-  factor(vhf$Gender,
+                       levels = c(1,2),
+                       labels = c("Homme", "Femme"), ordered=TRUE)
+
+
+# Status report - convert to categorical and label
+vhf$StatusReport  <-  factor(vhf$StatusReport,
+                             levels = c(1,2),
+                             labels = c("Decede", "Vivant"), ordered=TRUE)
+
+
+# Date de déces - change format
+vhf$DateDeath <- as.Date(vhf$DateDeath, format = '%d/%m/%Y')
+
+
+# FinalStatus
+vhf$FinalStatus <-  factor(vhf$FinalStatus,
+                           levels = c(1,2),
+                           labels = c("Decede", "Vivant"), ordered=TRUE)
+
+
+
+# DateDeath2 - reformat
+vhf$DateDeath2 <- as.Date(vhf$DateDeath2, format = '%d/%m/%Y')
+
+
+# DateDischargeHospital
+vhf$DateDischargeHosp <- as.Date(vhf$DateDischargeHosp, format = '%d/%m/%Y')
+
+# HospitalDischarge
+
+# VillageRes
+# Remove any trailing white spaces
+vhf$VillageRes <- str_trim(vhf$VillageRes)
+
+# ParishRes
+# Remove any trailing white spaces
+vhf$ParishRes <- str_trim(vhf$ParishRes)
+
+# manually fix one error
+vhf$ParishRes[vhf$ParishRes == "MONDO/KABASHA"] <- "KABASHA"
+
+# # Create a new ZS variable
+# vhf2 <- vhf %>%
+#   dplyr::select(SCRes, ParishRes, ID, DistrictRes) %>%
+#   left_join(healthzone, by = c("ParishRes" = "ParishRes"))
+
+
+# Clean up DistrictRes variable
+vhf$DistrictRes[vhf$SCRes %in% c("KOMANDA", "MANDIMA", "TCHOMIA")] <- "ITURI"
+
+vhf$DistrictRes[vhf$SCRes %in% c("BENI", "BUTEMBO", "KALUNGUTA",
+                                 "KATWA", "KYONDO", "LUBERO", 
+                                 "MABALAKO", "MASEREKA", "MUSIENENE",
+                                 "MUTWANGA", "VUHOVI")] <- "NORD-KIVU"
+
+
+#Date of Onset formatting
+vhf$DateOnset <- as.Date(vhf$DateOnset, format = '%d/%m/%Y')
+
+# Manually update date of onset
+vhf$DateOnset[vhf$ID=='BENV-058']  <-  as.Date('2018-08-31')
+
+
+# HospitalizedCurrent
+vhf$HospitalizedCurrent <- factor(vhf$HospitalizedCurrent ,
+                                  levels = c(1,2,3),
+                                  labels = c("Oui", "Non", "Inconnu"))
+
+
+# HospitalizedPast
+vhf$HospitalizedPast <- factor(vhf$HospitalizedPast ,
+                               levels = c(1,2,3),
+                               labels = c("Oui", "Non", "Inconnu"), ordered = TRUE)
+
+
+# Label for health care worker
+vhf$HCW[is.na(vhf$HCW) == TRUE | vhf$HCW == ""] <- "False"
+
+
+vhf$HCW <- factor(vhf$HCW,
+                  levels = c("True","False"),
+                  labels = c("Oui", "Non"), ordered = TRUE)
+
+
+# HCW position
+vhf$HCWposition<- str_trim(vhf$HCWposition)
+
+
+# HCW facility
+
+
+
+# clean up hospitalcurrent variable
+vhf$HospitalCurrent <- str_trim(vhf$HospitalCurrent) # strip away empty spaces
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE BENI", "CTE   BENI", 
+                                               " CTE BENI", "CTE/BENI")] <- "CTE BENI"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE  MANGINA", " CTE Mangina", 
+                                               "CTE MANGINA", "CTE Mangina")] <- "CTE MANGINA"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                               "CTE ITAV BUTEMBO", "CTE ITAV/ BUTEMBO", 
+                                               "CTE ITAV/BUTEMBO", "CTE ITAV", "CTE/BUTEMBO", 
+                                               "CTE  ITAV / BUTEMBO")] <- "CTE BUTEMBO"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE 2", "CTE")] <- "CTE"
+vhf$HospitalCurrent[vhf$HospitalCurrent == "CSR BIAKATOMINES"] <- "CSR BIAKATOMINE"
+
+
+# Clean up HospitalDischarge variable
+vhf$HospitalDischarge <- str_trim(vhf$HospitalDischarge) # strip away empty spaces
+
+vhf$HospitalDischarge[vhf$HospitalDischarge %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                                   "CTE ITAV BUTEMBO", "CTE ITAV//BUTEMBO", 
+                                                   "CTE ITAV/BUTEMBO")] <- "CTE BUTEMBO"
+
+vhf$HospitalDischarge[vhf$HospitalDischarge %in% c("CTE Mangina", "CTE MANGINA`" )] <- "CTE MANGINA"
+
+
+# Clean up HospitalDeath variable
+vhf$HospitalDeath <- str_trim(vhf$HospitalDeath) # strip away empty spaces
+
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                           "CTE ITAV BUTEMBO", "CTE ITAV/ BUTEMBO",
+                                           "CTE / ITAV BUTEMBO","CTE ITAV//BUTEMBO", 
+                                           "CTE ITAV/BUTEMBO")] <- "CTE BUTEMBO"
+
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE Mangina" )] <- "CTE MANGINA"
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE DE BENI" )] <- "CTE BENI"
+
+
+
+# change format of Hospitalcurrentadmit date and date IsolationCurrent
+vhf$DateHospitalCurrentAdmit <- as.Date(vhf$DateHospitalCurrentAdmit, format = '%d/%m/%Y')
+
+vhf$DateIsolationCurrent <- as.Date(vhf$DateIsolationCurrent, format = '%d/%m/%Y')
+
+
+# Additional cleaning of Aire de Sante
+vhf$SCRes[vhf$SCRes=='BABALAKO'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='MABAALAKO'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='MANGINA'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='BUTSILI'] = 'BENI'
+vhf$SCRes[vhf$SCRes=='LINZO'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='PAKANZA'] = 'OICHA'
+vhf$SCRes[vhf$SCRes=='TENAMBO'] = 'OICHA'
+vhf$SCRes[vhf$SCRes=='MANGODOMU'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='MATABA'] = 'KALUNGUTA'
+vhf$SCRes[vhf$ParishRes=='MABALAKO' & vhf$ParishRes=='KAMAHUME'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='ZS BUTEMBO'] = 'BUTEMBO'
+vhf$SCRes[vhf$SCRes=='ITURI'] = 'MANDIMA'
+vhf$SCRes[vhf$ID=='BENV-077'] = 'TCHOMIA'
+
+
+vhf$SCRes <- stri_trans_totitle(vhf$SCRes)
+
+
+# Fix error in Date hospitalCurrentAdmit for BENV-287
+vhf$DateHospitalCurrentAdmit[vhf$ID == "BENV-287"] <- "2018-10-27"
+
+
+vhf$ID[vhf$ID == "BENV-1004" & vhf$Surname == "MUMBERE"] <- NA
+
+
+# Check/management of duplicates/triplicates####
+#############################################
+nrow(vhf[duplicated(vhf$ID),])
+# 1 ID with duplicates
+
+#Make a new variable n that takes the value 1 for each row
+vhf$n <- 1
+
+#View the number of times each ID appears in the dataset by adding up each row of n
+duplicate <- vhf[,c("ID","n")] %>%
+  group_by(ID) %>%
+  summarise(n=sum(n))
+
+View(duplicate)
+
+# Create a dataset that shows the ID and case definition of duplicate cases
+duplicate_part1 <- vhf[vhf$ID %in% duplicate$ID[duplicate$n==2],c("ID", "EpiCaseDef")]
+
+View(duplicate_part1)
+
+
+# Check for duplicates based on name_age_sex_ZS_DateOnset ####
+#Create another type of ID based on age, sex, name, ZS and date of onset
+vhf <- vhf %>%
+  mutate(ID_new = paste0(Surname, Gender, Age, SCRes, DateOnset))
+
+#Count the number of rows with a duplicated ID_new
+nrow(vhf[duplicated(vhf$ID_new),])
+
+# View the number of times each ID_new appears
+duplicate_concatid <- vhf %>%
+  dplyr::select(ID_new, n)%>%
+  group_by(ID_new) %>%
+  summarize(n = sum(n))
+
+#Find out more information about each of the duplicated ID_new to see whether any action needed
+duplicate_part2 <- vhf[vhf$ID_new %in% duplicate_concatid$ID_new[duplicate_concatid$n >1],
+         c("ID", "EpiCaseDef", "Surname", "OtherNames", "DateOnset")]
+
+View(duplicate_part2)
+
+
+## Create final confirmed/probable dataset ####
+vhf_conprob <-  vhf[vhf$EpiCaseDef %in% c('Probable','Confirmé'),]
+```
+
+
+```{r table confprob, echo = FALSE, warning = FALSE, message = FALSE}
+#Create a table with counts of confirmed and probable cases over the past 2 weeks
+
+# Create variables that identify the epiweek from 2 weeks ago and the previous week
+epiweek2weeks <- isoweek(today()-14)
+epiweek1week <- isoweek(today()- 7)
+
+# Make a subset that contains only data from previous 2 weeks based on date report and create an epiweek variable
+vhf_conprob_twoweeks <- vhf_conprob %>%
+                    filter(is.na(DateReport) == FALSE, DateReport >=today() - 14) %>%
+                     mutate(epiweek = isoweek(DateReport)) 
+
+
+
+# Create a table that counts the number of confirmed and probable cases by ZS and Epiweek
+#we spread the data to have counts for confirmed and probable cases separately
+vhf_conprob_twoweeks_casecount <- vhf_conprob_twoweeks %>%
+                            dplyr::select(EpiCaseDef, epiweek, SCRes) %>%
+                            group_by(epiweek, SCRes, EpiCaseDef) %>%
+                            summarize( count = n()) %>%
+                            spread(EpiCaseDef, count) %>% 
+                            mutate(Probable = as.numeric(Probable),
+                                   Probable = if_else(is.na(Probable) == TRUE, 0, Probable),
+                                   Total = Confirmé + Probable)
+  
+# make a subset for 2 weeks ago
+epiweek_2weeks_table <- vhf_conprob_twoweeks_casecount %>%
+              filter(epiweek == epiweek2weeks) 
+
+#remove epiweek variable
+epiweek_2weeks_table <- epiweek_2weeks_table[,2:5]
+
+# make a subset for the previous week
+epiweek_1week_table <- vhf_conprob_twoweeks_casecount %>%
+               filter(epiweek == epiweek1week)
+
+#remove epiweek variable
+epiweek_1week_table <-epiweek_1week_table[,2:5] 
+
+#join the tables together by ZS keeping all data, add totals and fix names            
+overall_table <- epiweek_2weeks_table %>%
+                full_join(epiweek_1week_table, by = "SCRes") %>%
+                arrange(SCRes) %>%
+                janitor::adorn_totals("row") %>%
+                setNames(c("Zone de santé", "Confirmé", "Probable", "Total","Confirmé", "Probable", "Total" ))
+
+
+# Replace any NA with 0
+overall_table[is.na(overall_table) == TRUE] <- 0
+
+# Add formatting to the table, make total row bold and add header
+overall_table2 <- overall_table %>%
+  kable() %>%
+  row_spec(row = nrow(overall_table), bold = TRUE)%>%
+  kable_styling("striped") %>%
+  
+  
+  add_header_above(c("", epiweek2weeks =3, epiweek1week = 3)) # will need to be updated with actual epiweek numbers
+
+  
+  overall_table2
+
+```
+
+<br>
+<br>
+<br>
+
+
+
+```{r epicurve Date notif, echo = FALSE, warning = FALSE, message = FALSE}
+#Create an epicurve for previous 2 weeks, takes today's date assuming Monday and removes 2 weeks
+# dataset as defined for the table above
+# Make this epicurve daily by changing the interval to 1 and the date_breaks to 1 day below
+
+
+epicurve_notification_twoweeks <- incidence(vhf_conprob_twoweeks$DateReport, interval = 1, 
+                                  group = vhf_conprob_twoweeks$SCRes, na_as_group = FALSE)
+
+# Plot and adjust as necessary
+plot(epicurve_notification_twoweeks, stack = TRUE, border = "black") +
+  ggtitle("Courbe épidemique: cas MVE par zone de santé et semaine de notification") +
+  theme_classic()+
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+    axis.text.y = element_text(size = 8),
+    axis.ticks.x = element_line(size = .15),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(1, 'lines'))+ 
+    xlab("Semaine de notification") +
+    ylab("Nombre de cas") +
+  scale_x_date(date_breaks = "1 day", date_labels =  "%b %d") +
+  guides(fill=guide_legend(title="Zone de santé"))
+
+```
+<br>
+<br>
+<br>
+```{r age pyrmaid, echo = FALSE, warning = FALSE, message = FALSE}
+#Create an age pyramid for preceeding 2 weeks and separate them
+# Use the epiweek variable based on report date
+
+age_pyramid <- function(data) {
+        age_sex1 <- data %>%
+                   filter(is.na(AgeGrp)== FALSE & is.na(epiweek) ==FALSE) %>%
+                   dplyr::select(Gender, AgeGrp, epiweek) %>%
+                   group_by(Gender, AgeGrp, epiweek) %>%
+                   summarize(n = n())
+
+ agesex_overall <-  ggplot(age_sex1,
+        mapping = aes(x = AgeGrp, fill = Gender,
+                      y = ifelse(Gender == "Homme",
+                                 yes = -n, no = n) )) +
+   geom_bar(stat = "identity") +
+   geom_hline(yintercept = 0, size = 1) +
+   scale_y_continuous(labels = abs, breaks= scales::pretty_breaks(n=6),
+                      limits = max(age_sex1$n) * c(-1,1)) +
+   labs(y = "Nombre de cas") +
+    coord_flip() +
+    theme_classic() +
+    scale_fill_brewer(palette = "Set1", direction = -1) +
+    theme(axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+          axis.line.y = element_blank()) +
+  scale_x_discrete(position = "left") +
+   facet_grid(.~epiweek)
+}
+
+# Create an age-pyramid for all confirmed/probable cases from the beginning
+overall <- age_pyramid(vhf_conprob_twoweeks) + ggtitle("Distribution des cas confirmés et probables de MVE\n par âge et sexe et semaine de notification")
+
+overall
+
+# Make a table that counts the number of women/men per age group per week
+age_group_count <- vhf_conprob_twoweeks %>%
+  group_by(epiweek,AgeGrp, Gender) %>%
+  tally() %>%
+  spread(Gender, nn)
+
+age_group_count[is.na(age_group_count) == TRUE] <- 0
+
+age_group_count
+
+```
+
+<br>
+<br>
+<br>
+```{r epicurve fever, include = FALSE, warning = FALSE, message = FALSE}
+#Create an epicurve by date of notification and by whether or not cases had fever
+# Make the Fever variable a factor and relabel it for the graph
+vhf_conprob_twoweeks <- vhf_conprob_twoweeks %>%
+                    mutate(Fever = factor(Fever,
+                                          levels = c(1,2),
+                                          labels = c("Oui", "Non"), ordered = TRUE))
+                                              
+
+
+
+epicurve_fever_twoweeks <- incidence(vhf_conprob_twoweeks$DateReport, interval = 7, 
+                                  group = vhf_conprob_twoweeks$Fever, na_as_group = FALSE)
+
+# Plot and adjust as necessary
+plot(epicurve_fever_twoweeks, stack = TRUE, border = "black") +
+  ggtitle("Courbe épidemique: cas MVE par statut febrile et semaine de notification") +
+  theme_classic()+
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+    axis.text.y = element_text(size = 8),
+    axis.ticks.x = element_line(size = .15),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(1, 'lines'))+ 
+    xlab("Semaine de notification") +
+    ylab("Nombre de cas") +
+  scale_x_date(date_breaks = "1 week", date_labels =  "%b %d") +
+  guides(fill=guide_legend(title="Présence de fièvre")) 
+```
+
+<br>
+<br>
+<br>
+
+```{r median delay notification report date, echo = FALSE, warning = FALSE, message = FALSE}
+# Create table for preceeding 2 epiweeks comparing median delay between date notification and date onset
+# Make the delay variable DateReport - DateOnset, group by epiweek and summarize, median, min and max
+median_delay_epiweek <- vhf_conprob_twoweeks %>%
+                              filter(is.na(epiweek) == FALSE) %>%
+                              mutate(delay = DateReport - DateOnset) %>%
+                      dplyr::select( delay, epiweek) %>%
+                            group_by(epiweek) %>%
+                            summarize(median_delay = median(delay, na.rm = TRUE), 
+                                      min_delay = min(delay, na.rm = TRUE), 
+                                      max_delay = max(delay, na.rm = TRUE))
+
+median_delay_epiweek_table <-  median_delay_epiweek %>%
+                            set_names("Semaine épidemiologique", "Délai mediane", 
+                                      "Délai minimum", "Délai maximum")%>%
+                            kable(caption = "Délai mediane entre la date de début symptômes et la date de notification parmi les cas confirmés et probables et par semaine épidemiologique") %>% 
+                            kable_styling("striped", full_width = F, position = "left") 
+
+median_delay_epiweek_table
+```
+<br>
+<br>
+<br>
+<br>
+
+
+```{r median delay notification isolation, include = FALSE, warning = FALSE, message = FALSE}
+# Create table by preceeding 2 epiweeks comparing median delay between date isolation and date onset
+median_delay_epiweek <- vhf_conprob_twoweeks %>%
+                              filter(is.na(epiweek) == FALSE) %>%
+                              mutate(delay = DateIsolationCurrent - DateOnset) %>%
+                      dplyr::select( delay, epiweek) %>%
+                            group_by(epiweek) %>%
+                            summarize(median_delay = median(delay, na.rm = TRUE), 
+                                      min_delay = min(delay, na.rm = TRUE), 
+                                      max_delay = max(delay, na.rm = TRUE))
+
+median_delay_epiweek_table <-  median_delay_epiweek %>%
+                            set_names("Semaine épidemiologique", "Délai mediane", 
+                                      "Délai minimum", "Délai maximum")%>%
+                            kable(caption = "Délai mediane entre date de début symptômes et la date de notification parmi les cas confirmés et probable par semaine épidemiologique") %>% 
+                            kable_styling("striped", full_width = F, position = "left") 
+
+median_delay_epiweek_table
+```
+<br>
+<br>
+<br>
+
+```{r weekly contact, echo = FALSE, warning = FALSE, message = FALSE}
+#https://stackoverflow.com/questions/3099219/plot-with-2-y-axes-one-y-axis-on-the-left-and-another-y-axis-on-the-right/3117319
+
+#Create the suivi de contact figure for the previous month and remove the filter to have overall picture
+# format the variables
+contact$Date <- as.Date(contact$Date, format = '%d/%m/%Y')
+contact$suivis <- as.numeric(contact$suivis)
+contact$non_suivis <- as.numeric(contact$non_suivis)
+
+#sum suivis and non_suivis by date and make the proportion
+#as in link above to have a 2nd y-axis, based on the main y-axis which reaches 6000, need to multiply the value of proportion by 60 (60*100, normal 100 for rounding)
+contact2 <- contact %>% 
+          dplyr::select(Date, suivis, non_suivis) %>% 
+          filter(Date >= today()-30)%>%
+          group_by(Date) %>%
+          summarise_at(c("suivis", "non_suivis"), sum) %>%
+          mutate(proportion = round((suivis/(suivis + non_suivis))*6000, digits = 0)) %>%
+          gather(key = all_contacts, value = number, suivis, non_suivis) %>%
+          mutate(all_contacts = factor(all_contacts, levels = c("suivis", "non_suivis"),
+                                                      labels = c("Suivi", "Non-suivi"), ordered = TRUE))
+
+
+
+
+# This included adding a 2nd axis, have to divide the 2nd axis (sec_axis below) by 60 to get 100 as the top value for %
+contact_plot <- ggplot(contact2, aes(x = Date, y = number, fill = all_contacts)) +
+                geom_bar(stat = "identity", show.legend = TRUE) +
+                geom_line(mapping = aes(x = Date, y = proportion, lty = "%"), size = 0.6, 
+                          colour = "black", show.legend = TRUE) +
+                scale_y_continuous(name = "\nNombre de contact", expand = c(0,0),
+                                   # removes the space around 0s on bottom of graph
+                                   sec.axis = sec_axis(~./60,
+                                   name = "% de contacts suivis"), lim = c(0,6000))+
+                theme_classic()+
+                            theme(
+                            axis.title.x = element_text(size = 12),
+                            axis.title.y = element_text(size = 12),
+                            axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+                            axis.text.y = element_text(size = 8),
+                            axis.ticks.x = element_line(size = .15),
+                            legend.text = element_text(size = 8),
+                            legend.key.size = unit(1, 'lines'))+
+                            xlab("Date")+
+                            scale_linetype('Contacts suivis') +
+                            scale_x_date(date_breaks = "1 week", date_labels =  "%b %d") +
+                            ggtitle("Le suivi des contacts des cas confirmés et probables de MVE \n
+                                    dans le mois précédent")+
+                            scale_fill_manual(name = "Contacts", values = c("green4", "orangered2", "white"))
+
+
+contact_plot
+
+```
+
+
+
+```{r weekly alert summary, echo = FALSE, warning = FALSE, message = FALSE}
+
+#Prepare a summary of alertes by zone de Sante per day
+
+alerteweek <- isoweek(today() - 7)
+
+# str(alerte2)
+alerte$date_activite <- as.Date(alerte$date_activite, format = '%d/%m/%Y')
+
+#Remove the extra columns
+alerte <- alerte[,c(1:21)]
+
+#remove the extra rows and create new variables which are the sum of some variables in the dataset
+alerte2 <- alerte %>%
+  filter(!is.na(semepi)) %>%
+  dplyr::select(zone_sante, date_activite,semepi,
+         report_total,
+         nouvelle_totale,
+         total_alerte, total_investigues,
+         valid_viv, valid_dc, valid_tot) %>% 
+         group_by(semepi, zone_sante) %>%
+         summarise_at(c("report_total", "nouvelle_totale",
+                        "total_alerte", "total_investigues",
+                        "valid_viv", "valid_dc", "valid_tot"), sum, na.rm = TRUE) %>%
+         mutate(percent_investigues = if_else(total_alerte !=0,round((total_investigues/total_alerte)*100, 
+                                                                     digits = 0),0),
+         percent_valid  = if_else(total_investigues !=0,round((valid_tot/total_investigues)*100, 
+                                                              digits = 0),0)) %>%
+        dplyr::select(semepi, zone_sante, report_total,
+                      nouvelle_totale, total_alerte,total_investigues
+                      ,percent_investigues, valid_viv, valid_dc,
+                      valid_tot, percent_valid) # reorder the columns
+  
+
+
+# Make a table for the week of the alerte database (See above) and rename the variables
+  report <- alerte2 %>%
+  filter(semepi == alerteweek) 
+  
+  report <- report[,2:11]    
+  
+  report %>%
+  arrange(zone_sante) %>% # put in alphabetical order
+  mutate_at(vars(starts_with("percent_")), funs(as.character))%>% # converts the 2 % columns to characters
+  janitor::adorn_totals("row")  %>% # adds up row totals but won't add up character columns
+  set_names("Zone de Santé", "Report", "Nouvelles alertes", "Total alertes", "Alertes investiguées", "% investiguées", "Vivants", "Décédés", "Total validées", "% validées") %>%
+  kable(caption = "Un résumé des alertes par zone de santé dans la semaine précédente") %>%
+  kable_styling("striped") %>%
+    add_header_above(c("" ,"Alertes Réçues"=3,"", "", "Alertes validées"=3, ""))
+
+
+```
+<br>
+<br>
+<br>
+
+```{r weekly alert summary graph, echo = FALSE, warning = FALSE, message = FALSE}
+#https://stackoverflow.com/questions/39328023/adding-legend-to-a-single-line-chart-using-ggplot
+#https://stackoverflow.com/questions/3099219/plot-with-2-y-axes-one-y-axis-on-the-left-and-another-y-axis-on-the-right/3117319
+
+#Create a dataset that sums up the total alertes per day (total reported, new alertes, total investigations, validated alerts) in the preceeding week,
+# create new variables for % investigated, % validated and non_validated investigations as well as non-investigated
+# reorder the columns
+# gather the data creating a new variable all_alertes that counts the non investigated, total validated and non valid investigated alerts
+
+
+alerte3 <- alerte %>%
+  filter(!is.na(semepi) & date_activite >= today()-7) %>%
+  dplyr::select(zone_sante, date_activite,
+         report_total,
+         nouvelle_totale,
+         total_alerte, total_investigues,
+         valid_viv, valid_dc, valid_tot) %>% 
+         group_by(date_activite) %>%
+         summarise_at(c("report_total", "nouvelle_totale",
+                        "total_alerte", "total_investigues",
+                        "valid_viv", "valid_dc", "valid_tot"), sum, na.rm = TRUE) %>%
+         mutate(percent_investigues = if_else(total_alerte !=0,
+                                              round((total_investigues/total_alerte)*300, 
+                                                                     digits = 0),0),
+         percent_valid = if_else(total_investigues !=0,
+                                  round((valid_tot/total_investigues)*300,digits = 0),0),
+         investigues_non_valide = total_investigues - valid_tot,
+         non_investigues = total_alerte - total_investigues) %>%
+         dplyr::select(date_activite, report_total,nouvelle_totale, 
+                      total_alerte,total_investigues,non_investigues, 
+                      percent_investigues, valid_viv, valid_dc, 
+                      valid_tot,investigues_non_valide, percent_valid) %>% # reorder the columns
+         gather(key = all_alertes, value = number, valid_tot, investigues_non_valide, non_investigues)
+
+
+# Make all alertes into a factor and define the order for the plot
+alerte3$all_alertes <- factor(alerte3$all_alertes, levels = c("non_investigues",
+                                                                "valid_tot",
+                                                                "investigues_non_valide"),
+                                                      label = c("Non investiguées", "Investiguées validées",
+                                                                "Investiguées non validées"), ordered = TRUE)
+
+
+# Plot our new variable number which takes on the value of each of the variables in all_alertes and fill with all_alertes
+#add a line for percent validated and another for % investigated
+#apply both lines to the 2nd y-axis. Divide the 2nd y-axis so that the top value is 100 (need to multiply the proportion value by 3 above for this secondary axis to work)
+alerte_plot <- ggplot(alerte3, aes(x = date_activite, y = number, fill = all_alertes)) +
+                geom_bar(stat = "identity") +
+                geom_line(aes(x = date_activite, y = percent_valid, lty = "% validées"), colour = "red", size = 1) +
+                geom_line(aes(x = date_activite, y = percent_investigues, lty = "% investiguées"), size = 1)+
+                scale_y_continuous(name = "\nNombre d'alertes", limits = c(0,300), 
+                                   expand = c(0,0),
+                                   sec.axis = sec_axis(~./3,
+                                   name = "% d'alertes"))+
+                theme_classic()+
+                            theme(
+                            axis.title.x = element_text(size = 12),
+                            axis.title.y = element_text(size = 12),
+                            axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+                            axis.text.y = element_text(size = 8),
+                            axis.ticks.x = element_line(size = .15),
+                            legend.text = element_text(size = 8),
+                            legend.key.size = unit(1, 'lines'))+
+                            scale_linetype('')+
+                            xlab("Date")+
+                            scale_x_date(date_breaks = "1 day", date_labels =  "%b %d") +
+                            ggtitle("Alertes reçues, traitées et validées au cours de la semaine") +
+                            scale_fill_discrete(name = "Alertes")
+
+
+alerte_plot
+
+```

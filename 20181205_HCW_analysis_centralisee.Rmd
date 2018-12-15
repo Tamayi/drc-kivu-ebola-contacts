@@ -1,0 +1,607 @@
+---
+title: "Analyses des agents de sante avec la base centralisée jusqu'au 5 Décembre"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r, include = FALSE, warning = FALSE, message = FALSE}
+
+# installation des  packages
+required_packages <- c("incidence", "outbreaks", "summarytools", "RColorBrewer", 
+                       "DT", "reshape2", "arsenal", "formatR", "incidence", "Hmisc", "dplyr", 
+                       "boot", "data.table", "reshape", "xtable", "grid", "lubridate",
+                       "forecast", "R0","tidyverse", "tidyr", "ISOweek", "here",
+                       "epitools", "broom", "flextable", "ggthemes", "zoo", "tidyquant",
+                       "stringr", "RColorBrewer", "janitor", "kableExtra", "stringi", "reprex")
+
+# Pour eviter l'installation des packages deja installes
+
+for (pkg in required_packages) {
+  
+  if (pkg %in% rownames(installed.packages()) == FALSE) {
+    
+    install.packages(pkg)
+  }
+}
+
+for (i in seq(along = required_packages))
+  library(required_packages[i], character.only = TRUE)
+
+
+#### Data as of & output folders & lang#### 
+Sys.setlocale(locale = "French") # French for dates
+
+DateAsOf_vhf <- '20181205'
+
+
+
+#### Data ####
+path_to_data <- here("data", "vhf",DateAsOf_vhf,"BASE_VHF_CENTRALISEE.csv")
+path_to_data2 <- here("data", "alerte",DateAsOf_vhf, "Alertes.csv" )
+path_to_data3 <- here("data", "contact", DateAsOf_vhf, "Suivi_Contacts.csv")
+
+
+# 1) VHF case data
+vhf <- read.csv(path_to_data, stringsAsFactors = FALSE)
+
+# 2) Alerte data
+alerte <- read.csv(path_to_data2, stringsAsFactors = FALSE)
+
+#3) Contact data
+contact <- read.csv(path_to_data3, stringsAsFactors = FALSE)
+
+
+
+### Nettoyage de données - basé sur la liste de variable dans le plan d'analyse
+
+## ID
+
+
+# Status - make a categorical variale with 3 levels
+
+vhf$StatusAsOfCurrentDate <- factor(vhf$StatusAsOfCurrentDate, 
+                                    levels = c("Décédé", "Vivant"), 
+                                    ordered = TRUE)
+
+
+
+
+#Convert all date variables to the same format at one time
+# vhf <- vhf %>%
+# mutate_at(vars(starts_with("Date")), funs(as.Date, format ='%d/%m/%Y'))
+
+
+
+#DateReport
+vhf$DateReport <- as.Date(vhf$DateReport, format = '%d/%m/%Y')
+
+
+# creation d'un variable pour la definition du cas
+vhf$EpiCaseDef <- factor(vhf$EpiCaseDef,
+                         levels = c(1,2, 4,0), 
+                         labels = c("Confirmé","Probable","Suspect", "Testé négatif"), ordered = FALSE)
+
+vhf$EpiCaseDef[vhf$ID=='BENV-265'] <- 'Suspect'
+vhf$EpiCaseDef[vhf$ID=='BENV-264'] <- 'Suspect'
+vhf$EpiCaseDef[vhf$ID=='BENV-271'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-361'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-344'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-643'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-213'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-644'] <- 'Suspect' 
+vhf$EpiCaseDef[vhf$ID=='BENV-265'] <- 'Suspect'
+
+
+
+## Create a new age variable that fixes errors and includes month and years in one variable
+vhf$AgeYr <-  vhf$Age
+vhf$AgeYr <-  ifelse(vhf$AgeYr=="0,200000002980232",0,ifelse(vhf$AgeYr=="0,170000001788139",0,
+                                                             ifelse(vhf$AgeYr=="0,230000004172325",0,
+                                                                    ifelse(vhf$AgeYr=="6,5",0,
+                                                                           ifelse(vhf$AgeYr == "1,5", 1,vhf$AgeYr)))))
+
+vhf$AgeYr[vhf$AgeUnit=="Mois"] <-  ifelse (vhf$AgeYr[vhf$AgeUnit=="Mois"]<12,0,1)
+
+vhf$AgeYr <- as.numeric(vhf$AgeYr)
+
+vhf$AgeGrp = ifelse(vhf$AgeYr < 5, "<5ans",
+                    ifelse(vhf$AgeYr>=5&vhf$AgeYr<15, "5-14ans",
+                           ifelse(vhf$AgeYr>=15&vhf$AgeYr<25, "15-24ans",
+                                  ifelse(vhf$AgeYr>=25&vhf$AgeYr<35, "25-34ans",
+                                         ifelse(vhf$AgeYr>=35&vhf$AgeYr<45, "35-44ans",
+                                                ifelse(vhf$AgeYr>=45&vhf$AgeYr<60, "45-59ans",
+                                                       ifelse(vhf$AgeYr>=60, "60+ans",NA)))))))
+
+
+
+vhf$AgeGrp2 = ifelse(vhf$AgeYr < 5, "<5ans",
+                     ifelse(vhf$AgeYr>=5&vhf$AgeYr<10, "5-9ans",
+                            ifelse(vhf$AgeYr>=10&vhf$AgeYr<15, "10-14ans",
+                                   ifelse(vhf$AgeYr>=15&vhf$AgeYr<20, "15-19ans",
+                                          ifelse(vhf$AgeYr>=20&vhf$AgeYr<25, "20-24ans",
+                                                 ifelse(vhf$AgeYr>=25&vhf$AgeYr<30, "25-29ans",
+                                                        ifelse(vhf$AgeYr>=30&vhf$AgeYr<35, "30-34ans",
+                                                               ifelse(vhf$AgeYr>=35&vhf$AgeYr<39, "35-39ans",
+                                                                      ifelse(vhf$AgeYr>=40&vhf$AgeYr<45, "40-44ans",
+                                                                             ifelse(vhf$AgeYr>=45&vhf$AgeYr<49, "45-49ans",
+                                                                                    ifelse(vhf$AgeYr>=50&vhf$AgeYr<55, "50-54ans",
+                                                                                           ifelse(vhf$AgeYr>=55&vhf$AgeYr<59, "55-59ans",
+                                                                                                  ifelse(vhf$AgeYr>=60&vhf$AgeYr<65, "60-64ans",
+                                                                                                         ifelse(vhf$AgeYr>=65, "65+ans",NA))))))))))))))
+
+vhf$AgeGrp3 = ifelse(vhf$AgeYr < 1, "<1ans",
+                     ifelse(vhf$AgeYr >=1 & vhf$AgeYr<5, "1-4ans",
+                            ifelse(vhf$AgeYr>=5&vhf$AgeYr<15, "5-14ans",
+                                   ifelse(vhf$AgeYr>=15, "15+ans",NA))))
+
+vhf$AgeGrp3 = factor(vhf$AgeGrp3,
+                     levels = c("<1ans","1-4ans","5-14ans", "15+ans"))
+
+
+
+vhf$AgeGrp = factor(vhf$AgeGrp,
+                    levels = c("<5ans","5-14ans","15-24ans",
+                               "25-34ans","35-44ans","45-59ans","60+ans")
+                    ,ordered = TRUE)
+
+vhf$AgeGrp5 = ifelse(vhf$AgeYr < 5, "<5ans",
+                     ifelse(vhf$AgeYr >=5 & vhf$AgeYr<15, "5-14ans",
+                            ifelse(vhf$AgeYr>=15, "15+ans",NA)))
+vhf$AgeGrp5 = factor(vhf$AgeGrp5,
+                     levels = c("<5ans","5-14ans", "15+ans"))
+
+
+# Gender
+vhf$Gender  <-  factor(vhf$Gender,
+                       levels = c(1,2),
+                       labels = c("Homme", "Femme"), ordered=TRUE)
+
+
+# Status report - convert to categorical and label
+vhf$StatusReport  <-  factor(vhf$StatusReport,
+                             levels = c(1,2),
+                             labels = c("Décédé", "Vivant"), ordered=TRUE)
+
+
+# Date de déces - change format
+vhf$DateDeath <- as.Date(vhf$DateDeath, format = '%d/%m/%Y')
+
+
+# FinalStatus
+vhf$FinalStatus <-  factor(vhf$FinalStatus,
+                           levels = c(1,2),
+                           labels = c("Décédé", "Vivant"), ordered=TRUE)
+
+
+
+# DateDeath2 - reformat
+vhf$DateDeath2 <- as.Date(vhf$DateDeath2, format = '%d/%m/%Y')
+
+
+# DateDischargeHospital
+vhf$DateDischargeHosp <- as.Date(vhf$DateDischargeHosp, format = '%d/%m/%Y')
+
+# HospitalDischarge
+
+# VillageRes
+# Remove any trailing white spaces
+vhf$VillageRes <- str_trim(vhf$VillageRes)
+
+# ParishRes
+# Remove any trailing white spaces
+vhf$ParishRes <- str_trim(vhf$ParishRes)
+
+# manually fix one error
+vhf$ParishRes[vhf$ParishRes == "MONDO/KABASHA"] <- "KABASHA"
+
+# # # Create a new ZS variable
+# vhf2 <- vhf %>%
+#   dplyr::select(SCRes, ParishRes, ID, DistrictRes) %>%
+#   left_join(healthzone, by = c("ParishRes" = "ParishRes"))
+
+
+# Clean up DistrictRes variable
+vhf$DistrictRes[vhf$SCRes %in% c("KOMANDA", "MANDIMA", "TCHOMIA")] <- "ITURI"
+
+vhf$DistrictRes[vhf$SCRes %in% c("BENI", "BUTEMBO", "KALUNGUTA",
+                                 "KATWA", "KYONDO", "LUBERO", 
+                                 "MABALAKO", "MASEREKA", "MUSIENENE",
+                                 "MUTWANGA", "VUHOVI")] <- "NORD-KIVU"
+
+
+#Date of Onset formatting
+vhf$DateOnset <- as.Date(vhf$DateOnset, format = '%d/%m/%Y')
+
+# Manually update date of onset
+vhf$DateOnset[vhf$ID=='BENV-058']  <-  as.Date('2018-08-31')
+
+
+# HospitalizedCurrent
+vhf$HospitalizedCurrent <- factor(vhf$HospitalizedCurrent ,
+                                  levels = c(1,2,3),
+                                  labels = c("Oui", "Non", "Inconnu"))
+
+
+# HospitalizedPast
+vhf$HospitalizedPast <- factor(vhf$HospitalizedPast ,
+                               levels = c(1,2,3),
+                               labels = c("Oui", "Non", "Inconnu"), ordered = TRUE)
+
+
+# Label for health care worker
+vhf$HCW[is.na(vhf$HCW) == TRUE | vhf$HCW == ""] <- "False"
+
+
+vhf$HCW <- factor(vhf$HCW,
+                  levels = c("True","False"),
+                  labels = c("Oui", "Non"), ordered = TRUE)
+
+
+# HCW position
+vhf$HCWposition<- str_trim(vhf$HCWposition)
+
+
+# HCW facility
+
+
+
+# clean up hospitalcurrent variable
+vhf$HospitalCurrent <- str_trim(vhf$HospitalCurrent) # strip away empty spaces
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE BENI", "CTE   BENI", 
+                                               " CTE BENI", "CTE/BENI")] <- "CTE BENI"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE  MANGINA", " CTE Mangina", 
+                                               "CTE MANGINA", "CTE Mangina")] <- "CTE MANGINA"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                               "CTE ITAV BUTEMBO", "CTE ITAV/ BUTEMBO", 
+                                               "CTE ITAV/BUTEMBO", "CTE ITAV", "CTE/BUTEMBO", 
+                                               "CTE  ITAV / BUTEMBO")] <- "CTE BUTEMBO"
+
+
+vhf$HospitalCurrent[vhf$HospitalCurrent %in% c("CTE 2", "CTE")] <- "CTE"
+vhf$HospitalCurrent[vhf$HospitalCurrent == "CSR BIAKATOMINES"] <- "CSR BIAKATOMINE"
+
+
+# Clean up HospitalDischarge variable
+vhf$HospitalDischarge <- str_trim(vhf$HospitalDischarge) # strip away empty spaces
+
+vhf$HospitalDischarge[vhf$HospitalDischarge %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                                   "CTE ITAV BUTEMBO", "CTE ITAV//BUTEMBO", 
+                                                   "CTE ITAV/BUTEMBO")] <- "CTE BUTEMBO"
+
+vhf$HospitalDischarge[vhf$HospitalDischarge %in% c("CTE Mangina", "CTE MANGINA`" )] <- "CTE MANGINA"
+
+
+# Clean up HospitalDeath variable
+vhf$HospitalDeath <- str_trim(vhf$HospitalDeath) # strip away empty spaces
+
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE ITAV / BUTEMBO", "CTE ITAV /BUTEMBO", 
+                                           "CTE ITAV BUTEMBO", "CTE ITAV/ BUTEMBO",
+                                           "CTE / ITAV BUTEMBO","CTE ITAV//BUTEMBO", 
+                                           "CTE ITAV/BUTEMBO")] <- "CTE BUTEMBO"
+
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE Mangina" )] <- "CTE MANGINA"
+vhf$HospitalDeath[vhf$HospitalDeath %in% c("CTE DE BENI" )] <- "CTE BENI"
+
+
+
+# change format of Hospitalcurrentadmit date and date IsolationCurrent
+vhf$DateHospitalCurrentAdmit <- as.Date(vhf$DateHospitalCurrentAdmit, format = '%d/%m/%Y')
+
+vhf$DateIsolationCurrent <- as.Date(vhf$DateIsolationCurrent, format = '%d/%m/%Y')
+
+
+# Additional cleaning of Aire de Sante
+vhf$SCRes[vhf$SCRes=='BABALAKO'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='MABAALAKO'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='MANGINA'] = 'MABALAKO' 
+vhf$SCRes[vhf$SCRes=='BUTSILI'] = 'BENI'
+vhf$SCRes[vhf$SCRes=='LINZO'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='PAKANZA'] = 'OICHA'
+vhf$SCRes[vhf$SCRes=='TENAMBO'] = 'OICHA'
+vhf$SCRes[vhf$SCRes=='MANGODOMU'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='MATABA'] = 'KALUNGUTA'
+vhf$SCRes[vhf$ParishRes=='MABALAKO' & vhf$ParishRes=='KAMAHUME'] = 'MABALAKO'
+vhf$SCRes[vhf$SCRes=='ZS BUTEMBO'] = 'BUTEMBO'
+vhf$SCRes[vhf$SCRes=='ITURI'] = 'MANDIMA'
+vhf$SCRes[vhf$ID=='BENV-077'] = 'TCHOMIA'
+
+# This converts the ZS from CAPITAL to Capital
+vhf$SCRes <- stri_trans_totitle(vhf$SCRes)
+
+
+# Fix error in Date hospitalCurrentAdmit for BENV-287
+vhf$DateHospitalCurrentAdmit[vhf$ID == "BENV-287"] <- "2018-10-27"
+
+
+vhf$ID[vhf$ID == "BENV-1004" & vhf$Surname == "MUMBERE"] <- NA
+
+
+# Check/management of duplicates/triplicates####
+#############################################
+nrow(vhf[duplicated(vhf$ID),])
+# 1 ID with duplicates
+
+#Make a new variable n that takes the value 1 for each row
+vhf$n <- 1
+
+#View the number of times each ID appears in the dataset by adding up each row of n
+duplicate <- vhf[,c("ID","n")] %>%
+  group_by(ID) %>%
+  summarise(n=sum(n))
+
+View(duplicate)
+
+# Create a dataset that shows the ID and case definition of duplicate cases
+duplicate_part1 <- vhf[vhf$ID %in% duplicate$ID[duplicate$n==2],c("ID", "EpiCaseDef")]
+
+
+
+# Check for duplicates based on name_age_sex_ZS_DateOnset ####
+#Create another type of ID based on age, sex, name, ZS and date of onset
+vhf <- vhf %>%
+  mutate(ID_new = paste0(Surname, Gender, Age, SCRes, DateOnset))
+
+#Count the number of rows with a duplicated ID_new
+nrow(vhf[duplicated(vhf$ID_new),])
+
+# View the number of times each ID_new appears
+duplicate_concatid <- vhf %>%
+  dplyr::select(ID_new, n)%>%
+  group_by(ID_new) %>%
+  summarize(n = sum(n))
+
+#Find out more information about each of the duplicated ID_new to see whether any action needed
+duplicate_part2 <- vhf[vhf$ID_new %in% duplicate_concatid$ID_new[duplicate_concatid$n >1],
+         c("ID", "EpiCaseDef", "Surname", "OtherNames", "DateOnset")]
+
+View(duplicate_part2)
+
+
+## Create final confirmed/probable dataset ####
+vhf_conprob <-  vhf[vhf$EpiCaseDef %in% c('Probable','Confirmé'),]
+
+
+# Fix error on status of HCW where it was NA
+table(vhf_conprob$HCW, vhf_conprob$StatusAsOfCurrentDate, useNA = "always")
+
+vhf_conprob$StatusAsOfCurrentDate[vhf_conprob$HCW == "Oui"  & is.na(vhf_conprob$StatusAsOfCurrentDate) == TRUE] <- "Vivant"
+```
+<br>
+<br>
+<br>
+<br>
+
+```{r, include = FALSE, warning = FALSE, message = FALSE}
+# Preparation to create table with number of cases (probable, confirmed) and cumulative
+
+table(vhf_conprob$HCW, vhf_conprob$StatusAsOfCurrentDate, useNA = "always")
+
+vhf_conprob$StatusAsOfCurrentDate[vhf_conprob$HCW == "Oui"  & is.na(vhf_conprob$StatusAsOfCurrentDate) == TRUE] <- "Vivant"
+
+df_epitable <- vhf_conprob %>% 
+  filter(HCW == "Oui") %>%
+  dplyr::select(DistrictRes,SCRes,DateReport,EpiCaseDef,StatusAsOfCurrentDate, HCW)
+# df_epitable 
+
+tab_cumulative <- df_epitable %>% 
+  count(SCRes,EpiCaseDef) %>% 
+  spread(EpiCaseDef,n, fill=0)
+# tab_cumulative
+most_recent_date <- max(df_epitable$DateReport,na.rm = TRUE)
+# most_recent_date
+days21 <- Sys.Date()-23
+
+# days21
+
+df_epitable %>%
+  filter(DateReport >= days21) %>% 
+  arrange(desc(DateReport))
+
+table_21days <- df_epitable %>%
+  filter(DateReport >= days21) %>% 
+  arrange(desc(DateReport)) %>% 
+  count(SCRes,EpiCaseDef) %>% 
+  spread(EpiCaseDef,n, fill=0)
+
+df_epitable %>% 
+  filter(StatusAsOfCurrentDate=="Décédé",EpiCaseDef=="Confirmé") %>% 
+  count(SCRes)
+
+Deces_Conf <- df_epitable %>% 
+  filter(StatusAsOfCurrentDate=="Décédé",EpiCaseDef=="Confirmé") %>% 
+  count(SCRes)
+
+# Deces_Conf
+
+
+tab_cumulative %>% 
+  left_join(table_21days,by="SCRes") %>% 
+  left_join(Deces_Conf) 
+
+tab_overview <- tab_cumulative %>% 
+  left_join(table_21days,by="SCRes") %>% 
+  left_join(Deces_Conf) %>% 
+  janitor::adorn_totals("row") %>% 
+  set_names("ZS", "Confirmé", "Probable", "Confirmé", "Décès chez les confirmés")
+
+tab_overview[is.na(tab_overview)] <- 0
+
+```
+
+
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# Create table of cumulative cases, deaths, last 21 days and deaths among confirmed cases
+tab_overview2 <- tab_overview %>% 
+  kable() %>% 
+  row_spec(row = nrow(tab_overview), bold = TRUE) %>% # make the last row bold
+  kable_styling("striped") %>% 
+    add_header_above(c("","Cumul"=2,"21 derniers jours"=1, ""))
+
+tab_overview2
+
+```
+<br>
+<br>
+<br>
+
+
+ 
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# Create an epicurve by zone de santé by date of début de symptomes for HCW only
+epicurve_overall_conprob_zs <- incidence(vhf_conprob[vhf_conprob$HCW == "Oui", "DateOnset"], 
+                                         interval = 7,
+                                         group = vhf_conprob[vhf_conprob$HCW == "Oui", "SCRes"])
+
+# Choosing colours for the plot
+colourCount <-  length(unique(vhf_conprob$SCRes))
+getPalette <-  colorRampPalette(brewer.pal(length(unique(vhf_conprob$SCRes)), "Paired"))
+
+
+# Plot and adjust as necessary
+plot(epicurve_overall_conprob_zs, stack = TRUE, border = "black") +
+  ggtitle("Courbe épidemique: cas MVE par zone de santé pour les agents de santé et\nsemaine de début des symptômes") +
+  theme_classic()+
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+    axis.text.y = element_text(size = 8),
+    axis.ticks.x = element_line(size = .15),
+    legend.text = element_text(size = 8),
+    legend.title=element_blank(),
+    legend.key.size = unit(1, 'lines'))+ 
+    xlab("Semaine de début des symptômes") +
+    ylab("Nombre de cas") +
+  scale_x_date(date_breaks = "1 week", date_labels =  "%b %d") +
+  scale_fill_manual(values = getPalette(colourCount))
+
+```
+<br>
+<br>
+<br>
+
+<br>
+<br>
+<br>
+
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+#Create a function for epicurve by alive/dead status and date of onset and apply to zs
+
+
+epicurve_alive_dead <- incidence(vhf_conprob[vhf_conprob$HCW == "Oui", "DateOnset"], 
+                                         interval = 7,
+                                         group = vhf_conprob[vhf_conprob$HCW == "Oui", "StatusAsOfCurrentDate"])
+
+
+# Plot and adjust as necessary
+plot(epicurve_alive_dead, stack = TRUE, border = "black") +
+  theme_classic()+
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text.x = element_text(size = 8, vjust = .5, angle = 90),
+    axis.text.y = element_text(size = 8),
+    axis.ticks.x = element_line(size = .15),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(1, 'lines'))+ 
+    xlab("Semaine de début des symptômes") +
+    ylab("Nombre de cas") +
+  scale_x_date(date_breaks = "1 week", date_labels =  "%b %d") +
+  scale_fill_manual(name = "Statut actuel du cas",
+                      breaks = c("Décédé", "Vivant"),
+                      labels = c("Décédé", "Vivant"), values = c("Décédé" = "red", "Vivant" = "blue")) +
+  ggtitle("Courbe épidemique: cas MVE des agents de santé par statut actuel et\nsemaine de début des symptômes")
+
+
+```
+<br>
+<br>
+<br>
+
+<br>
+<br>
+<br>
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# Creates a table looking at death among age groups by health zone
+
+# Clean up groupings of medical staff
+
+vhf_conprob$HCWposition2 <- str_trim(vhf_conprob$HCWposition)
+
+vhf_conprob$HCWposition2[vhf_conprob$HCWposition2 %in% c("INFIRMIER", "INFIRMIERE", 
+                                                        "INFIRMIER TITULAIRE",
+                                                        "INFIRMIER DETENTEUR D4UNE PHARMACIE")] <- "INFIRMIER"
+
+
+vhf_conprob$HCWposition2[vhf_conprob$HCWposition2 %in% c("TL")] <- "TECHNICIEN DE LABO"
+
+
+
+
+                                          
+vhf_conprob_hcw_death <- vhf_conprob %>%
+                              filter(HCW == "Oui") %>%
+                              dplyr::select(StatusAsOfCurrentDate,HCWposition2, Gender) %>%
+                              group_by(HCWposition2, StatusAsOfCurrentDate, Gender) %>%
+                              tally() %>%
+                              spread(StatusAsOfCurrentDate,n)
+
+
+vhf_conprob_hcwposition <- vhf_conprob %>%
+                              filter(HCW == "Oui") %>%
+                              dplyr::select(HCWposition2) %>%
+                              group_by(HCWposition2) %>%
+                              tally() %>%
+                              adorn_totals("row") %>%
+                              kable()%>%
+                              kable_styling("striped")
+vhf_conprob_hcwposition
+  
+
+
+vhf_conprob_hcwposition_death <- vhf_conprob %>%
+                              filter(HCW == "Oui") %>%
+                              dplyr::select(HCWposition2, StatusAsOfCurrentDate) %>%
+                              group_by(HCWposition2, StatusAsOfCurrentDate) %>%
+                              tally() %>%
+                              spread(StatusAsOfCurrentDate,n)%>%
+                              adorn_totals("row") 
+
+vhf_conprob_hcwposition_death[is.na(vhf_conprob_hcwposition_death) == TRUE] <- 0
+
+
+vhf_conprob_hcwposition_death <- vhf_conprob_hcwposition_death%>%
+                              kable()%>%
+                              kable_styling("striped")
+
+vhf_conprob_hcwposition_death
+
+
+
+vhf_conprob_hcw_gender_death <- vhf_conprob %>%
+                              filter(HCW == "Oui") %>%
+                              dplyr::select(Gender, StatusAsOfCurrentDate) %>%
+                              group_by(Gender, StatusAsOfCurrentDate) %>%
+                              tally() %>%
+                              spread(StatusAsOfCurrentDate,n)%>%
+                              adorn_totals("row") 
+
+vhf_conprob_hcw_gender_death[is.na(vhf_conprob_hcw_gender_death) == TRUE] <- 0
+
+vhf_conprob_hcw_gender_death%>%
+                              kable()%>%
+                              kable_styling("striped")
+ 
+```
+<br>
+<br>
+<br>
